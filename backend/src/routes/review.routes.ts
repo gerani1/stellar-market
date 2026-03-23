@@ -1,15 +1,16 @@
-import { Router, Response } from "express";
+import { AuthRequest, authenticate } from "../middleware/auth";
 import { Prisma, PrismaClient } from "@prisma/client";
-import { authenticate, AuthRequest } from "../middleware/auth";
-import { validate } from "../middleware/validation";
-import { asyncHandler } from "../middleware/error";
-import { generateUserCacheKey, invalidateCacheKey } from "../lib/cache";
+import { Response, Router } from "express";
 import {
   createReviewSchema,
-  updateReviewSchema,
+  getReviewByIdParamSchema,
   getReviewsQuerySchema,
-  getReviewByIdParamSchema
+  updateReviewSchema
 } from "../schemas";
+import { generateUserCacheKey, invalidateCacheKey } from "../lib/cache";
+
+import { asyncHandler } from "../middleware/error";
+import { validate } from "../middleware/validation";
 
 const router = Router();
 /**
@@ -20,7 +21,7 @@ const router = Router();
  */
 const prisma = new PrismaClient();
 
-async function syncUserReviewAggregate(
+async function syncUserReviewAggregate (
   tx: Prisma.TransactionClient,
   userId: string,
 ): Promise<void> {
@@ -212,7 +213,7 @@ router.get("/:id",
   validate({ params: getReviewByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
-    
+
     const review = await prisma.review.findUnique({
       where: { id },
       include: {
@@ -243,11 +244,11 @@ router.put("/:id",
       ...req.body,
       ...(req.body.rating !== undefined
         ? {
-            rating:
-              typeof req.body.rating === "string"
-                ? parseInt(req.body.rating, 10)
-                : req.body.rating,
-          }
+          rating:
+            typeof req.body.rating === "string"
+              ? parseInt(req.body.rating, 10)
+              : req.body.rating,
+        }
         : {}),
     };
 
@@ -290,7 +291,7 @@ router.delete("/:id",
   validate({ params: getReviewByIdParamSchema }),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
-    
+
     const review = await prisma.review.findUnique({
       where: { id },
     });
