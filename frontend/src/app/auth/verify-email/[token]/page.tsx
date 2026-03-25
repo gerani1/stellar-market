@@ -45,10 +45,13 @@ export default function VerifyEmailTokenPage() {
               "Verification failed. The link may be invalid or expired.",
           );
         }
-      } catch (err: any) {
-        // eslint-disable-line @typescript-eslint/no-explicit-any
+      } catch (err) {
         setStatus("error");
-        setMessage(err.message || "An error occurred during verification.");
+        setMessage(
+          err instanceof Error
+            ? err.message
+            : "An error occurred during verification.",
+        );
       }
     };
 

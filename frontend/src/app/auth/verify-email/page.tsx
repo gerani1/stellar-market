@@ -34,9 +34,10 @@ export default function VerifyEmailPage() {
       if (!response.ok) throw new Error(data.error || "Failed to resend email");
 
       setResendMessage("Verification email sent! Please check your inbox.");
-    } catch (err: any) {
-      // eslint-disable-line @typescript-eslint/no-explicit-any
-      setResendError(err.message);
+    } catch (err) {
+      setResendError(
+        err instanceof Error ? err.message : "Failed to resend email",
+      );
     } finally {
       setIsResending(false);
     }

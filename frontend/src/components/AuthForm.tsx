@@ -18,7 +18,7 @@ interface AuthFormProps {
 }
 
 export default function AuthForm({ type }: AuthFormProps) {
-  const { login, register } = useAuth();
+  const { login } = useAuth();
   const { address, connect } = useWallet();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,9 +58,8 @@ export default function AuthForm({ type }: AuthFormProps) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Verification failed");
       login(data.token, data.user);
-    } catch (err: any) {
-      // eslint-disable-line @typescript-eslint/no-explicit-any
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verification failed");
     } finally {
       setIsLoading(false);
     }
@@ -116,9 +115,8 @@ export default function AuthForm({ type }: AuthFormProps) {
         // Redirect to verification page instead of logging in
         window.location.href = "/auth/verify-email";
       }
-    } catch (err: any) {
-      // eslint-disable-line @typescript-eslint/no-explicit-any
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setIsLoading(false);
     }
