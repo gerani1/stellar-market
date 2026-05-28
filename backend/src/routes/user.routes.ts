@@ -5,6 +5,7 @@ import {
   getUserByIdParamSchema,
   getUserJobsQuerySchema,
   getUsersQuerySchema,
+  updateCurrentUserProfileSchema,
   updateUserProfileSchema,
 } from "../schemas";
 
@@ -12,33 +13,11 @@ import { PrismaClient } from "@prisma/client";
 import { asyncHandler } from "../middleware/error";
 import { avatarUpload } from "../config/upload";
 import { validate } from "../middleware/validation";
-import { z } from "zod";
+import { ReputationService } from "../services/reputation.service";
+import { logger } from "../lib/logger";
 
 const router = Router();
 const prisma = new PrismaClient();
-
-// Zod schema for profile update payload
-const updateProfileSchema = z.object({
-  username: z
-    .string()
-    .min(3, "Username must be at least 3 characters")
-    .max(30, "Username must be at most 30 characters")
-    .regex(/^[a-zA-Z0-9_-]+$/, "Username can only contain letters, numbers, hyphens, and underscores")
-    .optional(),
-  email: z
-    .string()
-    .email("Invalid email address")
-    .optional()
-    .nullable(),
-  bio: z
-    .string()
-    .max(500, "Bio must be at most 500 characters")
-    .optional()
-    .nullable(),
-  role: z.enum(["CLIENT", "FREELANCER"]).optional(),
-  skills: z.array(z.string()).max(20).optional(),
-  availability: z.boolean().optional(),
-});
 
 // GET /api/users/me — return current authenticated user's full profile
 router.get("/me", authenticate, async (req: AuthRequest, res: Response) => {
@@ -68,82 +47,82 @@ router.get("/me", authenticate, async (req: AuthRequest, res: Response) => {
 
     res.json(user);
   } catch (error) {
-    console.error("Get current user error:", error);
+    logger.error({ err: error }, "Get current user error");
     res.status(500).json({ error: "Internal server error." });
   }
 });
 
 // PUT /api/users/me — update current authenticated user's profile
-router.put("/me", authenticate, async (req: AuthRequest, res: Response) => {
-  try {
-    const parsed = updateProfileSchema.safeParse(req.body);
+router.put(
+  "/me",
+  authenticate,
+  validate({ body: updateCurrentUserProfileSchema }),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const data = req.body as {
+        username?: string;
+        email?: string | null;
+        bio?: string | null;
+        role?: "CLIENT" | "FREELANCER";
+        skills?: string[];
+        availability?: boolean;
+      };
 
-    if (!parsed.success) {
-      const errors = (parsed.error as any).issues.map((e: any) => ({
-        field: e.path.join("."),
-        message: e.message,
-      }));
-      res.status(400).json({ error: "Validation failed.", details: errors });
-      return;
-    }
+      // Check username uniqueness if being updated
+      if (data.username) {
+        const existingUser = await prisma.user.findFirst({
+          where: {
+            username: data.username,
+            NOT: { id: req.userId },
+          },
+        });
+        if (existingUser) {
+          res.status(409).json({ error: "Username is already taken." });
+          return;
+        }
+      }
 
-    const data = parsed.data;
+      // Check email uniqueness if being updated
+      if (data.email) {
+        const existingUser = await prisma.user.findFirst({
+          where: {
+            email: data.email,
+            NOT: { id: req.userId },
+          },
+        });
+        if (existingUser) {
+          res.status(409).json({ error: "Email is already taken." });
+          return;
+        }
+      }
 
-    // Check username uniqueness if being updated
-    if (data.username) {
-      const existingUser = await prisma.user.findFirst({
-        where: {
-          username: data.username,
-          NOT: { id: req.userId },
+      const updatedUser = await prisma.user.update({
+        where: { id: req.userId },
+        data,
+        select: {
+          id: true,
+          username: true,
+          walletAddress: true,
+          email: true,
+          bio: true,
+          avatarUrl: true,
+          role: true,
+          skills: true,
+          availability: true,
+          createdAt: true,
         },
       });
-      if (existingUser) {
-        res.status(409).json({ error: "Username is already taken." });
-        return;
+
+      // Invalidate user profile cache
+      if (req.userId) {
+        await invalidateCacheKey(generateUserCacheKey(req.userId));
       }
+
+      res.json(updatedUser);
+    } catch (error) {
+      logger.error({ err: error }, "Update profile error");
+      res.status(500).json({ error: "Internal server error." });
     }
-
-    // Check email uniqueness if being updated
-    if (data.email) {
-      const existingUser = await prisma.user.findFirst({
-        where: {
-          email: data.email,
-          NOT: { id: req.userId },
-        },
-      });
-      if (existingUser) {
-        res.status(409).json({ error: "Email is already taken." });
-        return;
-      }
-    }
-
-    const updatedUser = await prisma.user.update({
-      where: { id: req.userId },
-      data,
-      select: {
-        id: true,
-        username: true,
-        walletAddress: true,
-        email: true,
-        bio: true,
-        avatarUrl: true,
-        role: true,
-        skills: true,
-        availability: true,
-        createdAt: true,
-      },
-    });
-
-    // Invalidate user profile cache
-    if (req.userId) {
-      await invalidateCacheKey(generateUserCacheKey(req.userId));
-    }
-
-    res.json(updatedUser);
-  } catch (error) {
-    console.error("Update profile error:", error);
-    res.status(500).json({ error: "Internal server error." });
-  }
 });
 
 router.post(
@@ -168,7 +147,7 @@ router.post(
       });
       res.json(updated);
     } catch (error) {
-      console.error("Avatar upload error:", error);
+      logger.error({ err: error }, "Avatar upload error");
       res.status(500).json({ error: "Internal server error." });
     }
   },
@@ -253,7 +232,7 @@ router.get(
       prisma.review.count({ where }),
     ]);
 
-    const data = reviews.map((r) => {
+    const data = reviews.map((r: any) => {
       const targetUser = type === "given" ? r.reviewee : r.reviewer;
       return {
         id: r.id,
@@ -288,6 +267,75 @@ router.get(
   }),
 );
 
+// GET /api/users/public/:username — public profile by username (no auth, no sensitive fields)
+router.get(
+  "/public/:username",
+  asyncHandler(async (_req: AuthRequest, res: Response) => {
+    const username = _req.params.username as string;
+
+    const user = await prisma.user.findUnique({
+      where: { username },
+      select: {
+        id: true,
+        username: true,
+        bio: true,
+        avatarUrl: true,
+        role: true,
+        skills: true,
+        averageRating: true,
+        reviewCount: true,
+        createdAt: true,
+        reviewsReceived: {
+          orderBy: { createdAt: "desc" as const },
+          take: 10,
+          select: {
+            id: true,
+            rating: true,
+            comment: true,
+            createdAt: true,
+            reviewer: {
+              select: {
+                id: true,
+                username: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+        freelancerJobs: {
+          where: { status: "COMPLETED" },
+          orderBy: { updatedAt: "desc" as const },
+          take: 10,
+          select: {
+            id: true,
+            title: true,
+            category: true,
+            createdAt: true,
+          },
+        },
+        portfolioItems: {
+          where: {},
+          orderBy: { displayOrder: "asc" as const },
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            fileUrl: true,
+            fileName: true,
+            mimeType: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    res.json(user);
+  }),
+);
+
 // Get user profile by ID
 router.get(
   "/:id",
@@ -307,6 +355,9 @@ router.get(
             avatarUrl: true,
             role: true,
             skills: true,
+            walletAddress: true,
+            averageRating: true,
+            reviewCount: true,
             createdAt: true,
             reviewsReceived: {
               orderBy: { createdAt: "desc" as const },
@@ -346,6 +397,17 @@ router.get(
 
         if (!user) {
           throw new Error("User not found");
+        }
+
+        if (user.role === "FREELANCER" && user.walletAddress) {
+          const reputation = await ReputationService.getReputation(user.walletAddress);
+          if (reputation) {
+            (user as any).reputation = {
+              totalScore: reputation.total_score.toString(),
+              totalWeight: reputation.total_weight.toString(),
+              reviewCount: reputation.review_count,
+            };
+          }
         }
 
         return user;
@@ -413,8 +475,25 @@ router.get(
       prisma.user.count({ where }),
     ]);
 
+    const usersWithReputation = await Promise.all(
+      users.map(async (user: any) => {
+        if (user.role === "FREELANCER" && user.walletAddress) {
+          const reputation = await ReputationService.getReputation(user.walletAddress);
+          return {
+            ...user,
+            reputation: reputation ? {
+              totalScore: reputation.total_score.toString(),
+              totalWeight: reputation.total_weight.toString(),
+              reviewCount: reputation.review_count,
+            } : null,
+          };
+        }
+        return user;
+      })
+    );
+
     res.json({
-      users,
+      users: usersWithReputation,
       pagination: {
         page,
         limit,
@@ -435,7 +514,7 @@ router.patch("/me/onboarding", authenticate, async (req: AuthRequest, res: Respo
     });
     res.json(user);
   } catch (error) {
-    console.error("Complete onboarding error:", error);
+    logger.error({ err: error }, "Complete onboarding error");
     res.status(500).json({ error: "Internal server error." });
   }
 });

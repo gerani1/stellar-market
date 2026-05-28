@@ -1,15 +1,36 @@
 import Link from "next/link";
-import { Star, MapPin, CheckCircle2, User } from "lucide-react";
+import { MapPin, CheckCircle2, User } from "lucide-react";
 import { User as UserType } from "@/types";
 import Image from "next/image";
+import StarRating from "./StarRating";
 
 interface FreelancerCardProps {
   freelancer: UserType;
+  /**
+   * Position of this card in the list (0-based).
+   * The first 3 cards (index 0-2) load eagerly with priority;
+   * all others are lazy-loaded.
+   */
+  index?: number;
 }
 
-export default function FreelancerCard({ freelancer }: FreelancerCardProps) {
-  const averageRating = freelancer.averageRating || 0;
-  const reviewCount = freelancer.reviewCount || 0;
+export default function FreelancerCard({ freelancer, index = 0 }: FreelancerCardProps) {
+  let averageRating = freelancer.averageRating || 0;
+  let reviewCount = freelancer.reviewCount || 0;
+
+  // Use on-chain reputation if available
+  if (freelancer.reputation) {
+    const totalScore = BigInt(freelancer.reputation.totalScore);
+    const totalWeight = BigInt(freelancer.reputation.totalWeight);
+
+    if (totalWeight > 0n) {
+      averageRating = Number(totalScore) / Number(totalWeight);
+    }
+    reviewCount = freelancer.reputation.reviewCount;
+  }
+
+  // First 3 cards are above-the-fold — load eagerly with priority
+  const isPriority = index < 3;
 
   return (
     <Link href={`/profile/${freelancer.id}`}>
@@ -19,10 +40,13 @@ export default function FreelancerCard({ freelancer }: FreelancerCardProps) {
             {freelancer.avatarUrl ? (
               <Image
                 src={freelancer.avatarUrl}
-                alt={freelancer.username}
+                alt={`${freelancer.username} avatar`}
                 fill
-                className="rounded-full object-cover border-2 border-theme-border group-hover:border-stellar-blue/30 transition-colors"
                 sizes="64px"
+                priority={isPriority}
+                loading={isPriority ? undefined : "lazy"}
+                placeholder="empty"
+                className="rounded-full object-cover border-2 border-theme-border group-hover:border-stellar-blue/30 transition-colors"
               />
             ) : (
               <div className="w-full h-full rounded-full bg-gradient-to-br from-stellar-blue/20 to-stellar-purple/20 flex items-center justify-center text-stellar-blue border-2 border-theme-border group-hover:border-stellar-blue/30 transition-colors">
@@ -30,20 +54,19 @@ export default function FreelancerCard({ freelancer }: FreelancerCardProps) {
               </div>
             )}
             {freelancer.availability && (
-              <div className="absolute bottom-0 right-0 w-4 h-4 bg-theme-success border-2 border-theme-bg rounded-full title='Available'" />
+              <div
+                className="absolute bottom-0 right-0 w-4 h-4 bg-theme-success border-2 border-theme-bg rounded-full"
+                title="Available"
+                aria-label="Available for work"
+              />
             )}
           </div>
           <div>
             <h3 className="text-lg font-bold text-theme-heading mb-1 group-hover:text-stellar-blue transition-colors">
               {freelancer.username}
             </h3>
-            <div className="flex items-center gap-1.5 text-xs text-theme-text font-medium">
-              <div className="flex items-center gap-1 text-yellow-500">
-                <Star size={14} fill="currentColor" />
-                <span>{averageRating.toFixed(1)}</span>
-              </div>
-              <span>•</span>
-              <span>{reviewCount} {reviewCount === 1 ? 'Review' : 'Reviews'}</span>
+            <div className="mt-1">
+              <StarRating rating={averageRating} reviewCount={reviewCount} />
             </div>
           </div>
         </div>

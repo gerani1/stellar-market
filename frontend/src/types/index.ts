@@ -13,6 +13,24 @@ export interface User {
   reviewCount?: number;
   availability?: boolean;
   completedOnboarding?: boolean;
+  reputation?: {
+    totalScore: string;
+    totalWeight: string;
+    reviewCount: number;
+  };
+}
+
+export interface PortfolioItem {
+  id: string;
+  userId: string;
+  title: string;
+  description?: string;
+  fileUrl: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  displayOrder: number;
+  createdAt: string;
 }
 
 export interface Milestone {
@@ -21,7 +39,7 @@ export interface Milestone {
   title: string;
   description: string;
   amount: number;
-  status: "PENDING" | "IN_PROGRESS" | "SUBMITTED" | "APPROVED" | "REJECTED";
+  status: "PENDING" | "IN_PROGRESS" | "SUBMITTED" | "APPROVED" | "REJECTED" | "PARTIALLY_PAID";
   order: number;
   onChainIndex?: number;
   contractDeadline?: string;
@@ -58,7 +76,9 @@ export interface Job {
   contractJobId?: string;
   escrowStatus: "UNFUNDED" | "FUNDED" | "COMPLETED" | "CANCELLED" | "DISPUTED";
   revisionProposal?: RevisionProposal | null;
+  imageUrl?: string;
   createdAt: string;
+  updatedAt?: string;
   _count?: { applications: number };
 }
 
@@ -126,6 +146,7 @@ export interface UserProfile extends User {
   averageRating: number;
   reviewCount: number;
   services: ServiceListing[];
+  portfolioItems?: PortfolioItem[];
   createdAt: string;
 }
 
@@ -174,7 +195,7 @@ export interface Dispute {
   initiatorId: string;
   respondentId: string;
   reason: string;
-  status: "OPEN" | "VOTING" | "RESOLVED_CLIENT" | "RESOLVED_FREELANCER";
+  status: "OPEN" | "VOTING" | "RESOLVED_CLIENT" | "RESOLVED_FREELANCER" | "ESCALATED";
   votesForClient: number;
   votesForFreelancer: number;
   minVotes: number;
@@ -184,4 +205,36 @@ export interface Dispute {
   initiator: User;
   respondent: User;
   votes: Vote[];
+}
+
+export interface Transaction {
+  id: string;
+  jobId: string;
+  milestoneId?: string;
+  fromAddress: string;
+  toAddress: string;
+  amount: number;
+  tokenAddress: string;
+  txHash: string;
+  type: "DEPOSIT" | "RELEASE" | "REFUND" | "DISPUTE_PAYOUT";
+  createdAt: string;
+  updatedAt?: string;
+  job?: {
+    id: string;
+    title: string;
+  };
+  milestone?: {
+    id: string;
+    title: string;
+  };
+}
+
+export interface TransactionResponse {
+  transactions: Transaction[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 }

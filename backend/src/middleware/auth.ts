@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { config } from "../config";
 import { PrismaClient, UserRole } from "@prisma/client";
+import { logger } from "../lib/logger";
 
 const prisma = new PrismaClient();
 
@@ -55,6 +56,8 @@ export const authenticate = async (
       "/auth/2fa/validate",
       "/auth/forgot-password",
       "/auth/reset-password",
+      "/auth/refresh",
+      "/auth/logout",
     ];
 
     const isExempt = exemptRoutes.some((route) => req.path.includes(route));
@@ -146,7 +149,7 @@ export const checkSuspension = async (
 
     next();
   } catch (error) {
-    console.error("Error checking suspension status:", error);
+    logger.error({ err: error }, "Error checking suspension status");
     next();
   }
 };

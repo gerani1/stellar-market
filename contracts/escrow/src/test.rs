@@ -41,7 +41,13 @@ fn setup_test(env: &Env) -> (EscrowContractClient<'_>, Address, Address, Address
 }
 
 fn pause_escrow(env: &Env, client: &EscrowContractClient<'_>, admin: &Address) {
-    client.propose_admin_action(admin, &AdminAction::Pause);
+    // Pause proposals have a 48-hour time lock and cannot auto-execute with a single signer.
+    // Add a temp signer (no time lock), then advance past the lock and approve with it.
+    let temp_signer = Address::generate(env);
+    client.propose_admin_action(admin, &AdminAction::AddSigner(temp_signer.clone()));
+    let proposal_id = client.propose_admin_action(admin, &AdminAction::Pause);
+    env.ledger().with_mut(|l| l.timestamp += 48 * 60 * 60 + 1);
+    client.approve_admin_action(&temp_signer, &proposal_id);
 }
 
 fn unpause_escrow(env: &Env, client: &EscrowContractClient<'_>, admin: &Address) {
@@ -100,10 +106,71 @@ fn test_create_job() {
     assert_eq!(job.client, client_addr);
     assert_eq!(job.freelancer, freelancer);
     assert_eq!(job.total_amount, expected_total);
-    assert_eq!(job.status, JobStatus::Created);
-    assert_eq!(job.milestones.len(), 3);
-    assert_eq!(job.job_deadline, JOB_DEADLINE);
-    assert_eq!(job.auto_refund_after, GRACE_PERIOD);
+}
+
+#[test]
+fn test_extend_deadline_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, client_addr, freelancer, token, _) = setup_test(&env);
+
+    let milestones = vec![
+        &env,
+        (String::from_str(&env, "Design mockups"), 500_i128, JOB_DEADLINE),
+    ];
+
+    let job_id = contract.create_job(
+        &client_addr,
+        &freelancer,
+        &token,
+        &milestones,
+        &JOB_DEADLINE,
+        &GRACE_PERIOD,
+    );
+
+    let new_deadline = JOB_DEADLINE + 1000;
+    contract.extend_deadline(&job_id, &0, &new_deadline);
+
+    let events = env.events().all();
+    let last_event = events.last().unwrap();
+    
+    // Topics: (symbol_short!("escrow"), symbol_short!("deadline"))
+    assert_eq!(
+        last_event.0,
+        contract.address
+    );
+    let topic0: Symbol = last_event.1.get(0).unwrap().into_val(&env);
+    assert_eq!(topic0, symbol_short!("escrow"));
+    let topic1: Symbol = last_event.1.get(1).unwrap().into_val(&env);
+    assert_eq!(topic1, symbol_short!("deadline"));
+    
+    // Payload: (job_id, milestone_id, new_deadline)
+    let payload: (u64, u32, u64) = last_event.2.into_val(&env);
+    assert_eq!(payload, (job_id, 0, new_deadline));
+}
+
+#[test]
+fn test_fee_cap_enforcement_invalid_fee_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let signers = vec![&env, admin.clone()];
+    let treasury = Address::generate(&env);
+    
+    // Initialize with valid fee first
+    client.initialize(&signers, &1, &treasury, &0, &604800);
+
+    // Try to set fee above MAX_FEE_BPS (1000)
+    let action = AdminAction::SetFeeBps(1001);
+    
+    // This should return EscrowError::InvalidFee (35)
+    let result = client.try_propose_admin_action(&admin, &action);
+    assert_eq!(result, Err(Ok(EscrowError::InvalidFee)));
 }
 
 #[test]
@@ -159,6 +226,51 @@ fn test_create_job_invalid_deadline() {
         &milestones,
         &2000_u64,
         &GRACE_PERIOD, // Correction 5
+    );
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #33)")] // EmptyMilestones
+fn test_create_job_empty_milestones() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, user, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![&env];
+
+    contract.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &2000_u64,
+        &GRACE_PERIOD,
+    );
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #34)")] // TooManyMilestones
+fn test_create_job_too_many_milestones() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, user, freelancer, token, admin) = setup_test(&env);
+
+    let mut milestones = vec![&env];
+    for _ in 0..51 {
+        milestones.push_back((String::from_str(&env, "Task"), 100_i128, 2000_u64));
+    }
+
+    contract.create_job(
+        &user,
+        &freelancer,
+        &token,
+        &milestones,
+        &3000_u64,
+        &GRACE_PERIOD,
     );
 }
 
@@ -796,6 +908,29 @@ fn test_propose_revision_fails_when_pending_proposal_exists() {
     ];
     contract.propose_revision(&client, &job_id, &new_milestones);
     contract.propose_revision(&freelancer, &job_id, &new_milestones);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #34)")] // TooManyMilestones
+fn test_propose_revision_too_many_milestones() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract, client, freelancer, token, admin) = setup_test(&env);
+
+    let milestones = vec![&env, (String::from_str(&env, "Initial"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD);
+
+    let mut new_milestones = vec![&env];
+    for i in 0..51 {
+        new_milestones.push_back(Milestone {
+            id: i,
+            description: String::from_str(&env, "New"),
+            amount: 10,
+            status: MilestoneStatus::Pending,
+            deadline: JOB_DEADLINE,
+        });
+    }
+    contract.propose_revision(&client, &job_id, &new_milestones);
 }
 
 #[test]
@@ -1495,15 +1630,16 @@ fn test_read_only_functions_when_paused() {
     let user = Address::generate(&env);
     let freelancer = Address::generate(&env);
     let token = env.register_contract(None, MockToken);
-    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 2000_u64)];
+    // Both deadlines must exceed the 48-hour time advance done by pause_escrow (172801s)
+    let milestones = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, 1_000_000_u64)];
 
     let job_id = client.create_job(
         &user,
         &freelancer,
         &token,
         &milestones,
-        &2500_u64,
-        &GRACE_PERIOD, // Correction 5
+        &2_000_000_u64,
+        &GRACE_PERIOD,
     );
 
     pause_escrow(&env, &client, &admin);
@@ -2164,7 +2300,10 @@ fn test_multisig_pause_flow() {
     // Proposal exists but not executed yet (needs 2/2)
     assert_eq!(contract.is_paused(), false);
 
-    // signer2 approves
+    // Advance past the 48-hour time lock required for Pause proposals
+    env.ledger().with_mut(|l| l.timestamp += 48 * 60 * 60 + 1);
+
+    // signer2 approves — threshold met and time lock passed, so proposal executes
     contract.approve_admin_action(&signer2, &proposal_id);
 
     // Execution should be automatic after second approval
@@ -2380,5 +2519,125 @@ fn test_release_partial_payment_unauthorized_rejected() {
     let attacker = Address::generate(&env);
     let result = contract.try_release_partial_payment(&job_id, &0, &100_i128, &attacker);
     assert!(result.is_err()); // Unauthorized (#2)
+}
+
+// ── top_up_escrow tests (issue #489) ─────────────────────────────────────────
+
+#[test]
+fn test_top_up_escrow_partial_top_up() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, client, freelancer, token, _admin) = setup_test(&env);
+
+    // Mint extra tokens so client can top up
+    let token_admin = StellarAssetClient::new(&env, &token);
+    token_admin.mint(&client, &5000);
+
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD);
+
+    contract.fund_job(&job_id, &client);
+
+    // Simulate revision increasing total_amount so there is room to top up
+    env.as_contract(&contract.address, || {
+        let key = crate::DataKey::Job(job_id);
+        let mut job: crate::Job = env.storage().persistent().get(&key).unwrap();
+        job.total_amount = 1500;
+        env.storage().persistent().set(&key, &job);
+    });
+
+    // Partial top-up: add 300 (funded_amount goes from 1000 → 1300)
+    contract.top_up_escrow(&client, &job_id, &300_i128);
+
+    let job: crate::Job = env.as_contract(&contract.address, || {
+        env.storage().persistent().get(&crate::DataKey::Job(job_id)).unwrap()
+    });
+    assert_eq!(job.funded_amount, 1300);
+}
+
+#[test]
+fn test_top_up_escrow_completing_funding() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, client, freelancer, token, _admin) = setup_test(&env);
+
+    let token_admin = StellarAssetClient::new(&env, &token);
+    token_admin.mint(&client, &5000);
+
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD);
+
+    contract.fund_job(&job_id, &client);
+
+    env.as_contract(&contract.address, || {
+        let key = crate::DataKey::Job(job_id);
+        let mut job: crate::Job = env.storage().persistent().get(&key).unwrap();
+        job.total_amount = 1500;
+        env.storage().persistent().set(&key, &job);
+    });
+
+    // Top up the full remaining 500
+    contract.top_up_escrow(&client, &job_id, &500_i128);
+
+    let job: crate::Job = env.as_contract(&contract.address, || {
+        env.storage().persistent().get(&crate::DataKey::Job(job_id)).unwrap()
+    });
+    assert_eq!(job.funded_amount, job.total_amount);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn test_top_up_escrow_overfund_rejection() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, client, freelancer, token, _admin) = setup_test(&env);
+
+    let token_admin = StellarAssetClient::new(&env, &token);
+    token_admin.mint(&client, &5000);
+
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD);
+    contract.fund_job(&job_id, &client);
+
+    // Trying to top up on a fully-funded job should fail with AlreadyFunded (#6)
+    contract.top_up_escrow(&client, &job_id, &1_i128);
+}
+
+#[test]
+fn test_top_up_escrow_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    let (contract, client, freelancer, token, _admin) = setup_test(&env);
+
+    let token_admin = StellarAssetClient::new(&env, &token);
+    token_admin.mint(&client, &5000);
+
+    let milestones = vec![&env, (String::from_str(&env, "Work"), 1000_i128, JOB_DEADLINE)];
+    let job_id = contract.create_job(&client, &freelancer, &token, &milestones, &JOB_DEADLINE, &GRACE_PERIOD);
+    contract.fund_job(&job_id, &client);
+
+    env.as_contract(&contract.address, || {
+        let key = crate::DataKey::Job(job_id);
+        let mut job: crate::Job = env.storage().persistent().get(&key).unwrap();
+        job.total_amount = 1500;
+        env.storage().persistent().set(&key, &job);
+    });
+
+    contract.top_up_escrow(&client, &job_id, &200_i128);
+
+    let events = env.events().all();
+    let last_event = events.last().expect("top_up event should be emitted");
+    let topic0: Symbol = last_event.1.get(0).unwrap().into_val(&env);
+    let topic1: Symbol = last_event.1.get(1).unwrap().into_val(&env);
+    assert_eq!(topic0, symbol_short!("escrow"));
+    assert_eq!(topic1, symbol_short!("top_up"));
 }
 

@@ -10,6 +10,7 @@ export const registerSchema = z.object({
     .min(2, "Name must be at least 2 characters long")
     .max(100, "Name must be less than 100 characters"),
   role: z.enum(["CLIENT", "FREELANCER"]).default("FREELANCER"),
+  referralCode: z.string().min(1).max(100).optional(),
 });
 
 export const loginSchema = z.object({
@@ -50,4 +51,8 @@ export const twoFactorDisableSchema = z.object({
 export const twoFactorValidateSchema = z.object({
   code: z.string().min(1, "Code is required"),
   tempToken: z.string().min(1, "Temporary token is required"),
+});
+
+export const refreshTokenSchema = z.object({
+  refreshToken: z.string().min(1, "Refresh token is required").optional(),
 });

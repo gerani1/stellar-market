@@ -31,22 +31,34 @@ export const globalRateLimiter = rateLimit({
   max: 200,
   standardHeaders: true,
   legacyHeaders: false,
+  passOnStoreError: true,
   handler: sendTooManyRequests,
 });
 
-export const authRateLimiter = rateLimit({
+export const loginRateLimiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  passOnStoreError: true,
+  handler: sendTooManyRequests,
+});
+
+export const registerRateLimiter = rateLimit({
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: true,
   handler: sendTooManyRequests,
 });
 
 export const forgotPasswordRateLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
+  windowMs: 60 * 60 * 1000,
   max: 3,
   standardHeaders: true,
   legacyHeaders: false,
+  passOnStoreError: true,
   handler: sendTooManyRequests,
 });
 
@@ -55,6 +67,7 @@ export const writeRateLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  passOnStoreError: true,
   keyGenerator: (req) => {
     const rateLimitedReq = req as RateLimitedRequest;
     return rateLimitedReq.userId || req.ip || "unknown";

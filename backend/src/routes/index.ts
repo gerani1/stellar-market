@@ -15,10 +15,16 @@ import disputeRoutes from "./dispute.routes";
 import recommendationRoutes from "./recommendation.routes";
 import freelancerRoutes from "./freelancer.routes";
 import platformRoutes from "./platform.routes";
+import portfolioRoutes from "./portfolio.routes";
+import webhookRoutes from "./webhook.routes";
+import healthRoutes from "./health.routes";
+import referralRoutes from "./referral.routes";
 import reportRoutes from "./report.routes";
 
 const router = Router();
 
+router.use("/health", healthRoutes);
+router.use("/referrals", referralRoutes);
 router.use("/auth", authRoutes);
 router.use("/users", userRoutes);
 router.use("/notifications", notificationRoutes);
@@ -35,6 +41,8 @@ router.use("/admin", adminRoutes);
 router.use("/disputes", disputeRoutes);
 router.use("/freelancers", freelancerRoutes);
 router.use("/platform", platformRoutes);
+router.use("/portfolio", portfolioRoutes);
+router.use("/webhooks", webhookRoutes);
 router.use("/reports", reportRoutes);
 
 export default router;

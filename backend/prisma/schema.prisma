@@ -40,6 +40,7 @@ enum MilestoneStatus {
   SUBMITTED
   APPROVED
   REJECTED
+  PARTIALLY_PAID
 }
 
 enum ApplicationStatus {
@@ -69,9 +70,18 @@ enum NotificationType {
   APPLICATION_REJECTED
   MILESTONE_SUBMITTED
   MILESTONE_APPROVED
+  PAYMENT_RELEASED
   DISPUTE_RAISED
   DISPUTE_RESOLVED
   NEW_MESSAGE
+  BADGE_AWARDED
+}
+
+enum BadgeTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
 }
 
 enum DisputeStatus {
@@ -101,6 +111,7 @@ model User {
   isSuspended            Boolean   @default(false)
   suspendReason          String?
   suspendedAt            DateTime?
+  isSuspiciousReporter   Boolean   @default(false)
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
   availability           Boolean   @default(true)
@@ -128,6 +139,28 @@ model User {
   votesCast          DisputeVote[]  @relation("VotesCast")
   savedJobs          SavedJob[]     @relation("SavedJobs")
   reportsGiven       Report[]       @relation("ReportsGiven")
+  badges             Badge[]
+  notificationPreference NotificationPreference?
+  portfolioItems     PortfolioItem[]
+  webhooks           Webhook[]
+
+  referralCode       String?   @unique
+  referredById       String?
+  referredBy         User?     @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals          User[]    @relation("UserReferrals")
+  referralBonusEarned Float    @default(0)
+  refreshTokens      RefreshToken[]
+}
+
+model NotificationPreference {
+  userId                 String   @id
+  emailEnabled           Boolean  @default(true)
+  emailDisputeOpened     Boolean  @default(true)
+  emailMilestoneApproved Boolean  @default(true)
+  emailPaymentReleased   Boolean  @default(true)
+  emailApplicationAccepted Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Job {
@@ -147,6 +180,7 @@ model Job {
   flagReason    String?
   flaggedAt     DateTime?
   flaggedBy     String?
+  deletedAt     DateTime?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -160,6 +194,8 @@ model Job {
   attachments  Attachment[]
   dispute      Dispute?
   savedBy      SavedJob[]    @relation("SavedByFreelancers")
+
+  @@index([deletedAt])
 }
 
 model Milestone {
@@ -177,6 +213,7 @@ model Milestone {
 
   job          Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
   transactions Transaction[]
+  attachments  Attachment[]
 }
 
 model Application {
@@ -251,24 +288,27 @@ model Transaction {
 }
 
 model Attachment {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   uploaderId   String
   jobId        String?
   disputeId    String?
+  milestoneId  String?
   filename     String
   originalName String
   mimeType     String
   size         Int
   url          String
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
 
-  uploader User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
-  job      Job?     @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  dispute  Dispute? @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  uploader  User       @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  job       Job?       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  dispute   Dispute?   @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  milestone Milestone? @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
 
   @@index([uploaderId])
   @@index([jobId])
   @@index([disputeId])
+  @@index([milestoneId])
   @@index([createdAt])
 }
 
@@ -381,13 +421,14 @@ model SystemState {
 }
 
 model Report {
-  id         String           @id @default(cuid())
-  reporterId String
-  targetType ReportTargetType
-  targetId   String
-  reason     String
-  status     ReportStatus     @default(PENDING)
-  createdAt  DateTime         @default(now())
+  id             String           @id @default(cuid())
+  reporterId     String
+  targetType     ReportTargetType
+  targetId       String
+  reason         String
+  status         ReportStatus     @default(PENDING)
+  requiresReview Boolean          @default(false)
+  createdAt      DateTime         @default(now())
 
   reporter User @relation("ReportsGiven", fields: [reporterId], references: [id], onDelete: Cascade)
 
@@ -395,4 +436,91 @@ model Report {
   @@index([targetType])
   @@index([status])
   @@index([createdAt])
+}
+
+model SyncState {
+  id                String   @id @default("default")
+  lastIndexedLedger Int      @default(0)
+  updatedAt         DateTime @updatedAt
+}
+
+model Badge {
+  id            String    @id @default(cuid())
+  userId        String
+  tier          BadgeTier
+  awardedLedger Int
+  createdAt     DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tier])
+  @@index([userId])
+}
+
+model PortfolioItem {
+  id           String   @id @default(cuid())
+  userId       String
+  title        String
+  description  String?
+  fileUrl      String
+  fileName     String
+  mimeType     String
+  size         Int
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, displayOrder])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  userId    String
+  url       String
+  event     String
+  secret    String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([userId])
+  @@index([event])
+}
+
+model WebhookDelivery {
+  id           String    @id @default(cuid())
+  webhookId    String
+  event        String
+  payload      Json
+  status       String    @default("pending")
+  attempts     Int       @default(0)
+  lastAttempt  DateTime?
+  nextRetry    DateTime?
+  responseCode Int?
+  createdAt    DateTime  @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([status])
+  @@index([nextRetry])
 }
