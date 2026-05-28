@@ -43,6 +43,7 @@ export interface Milestone {
   order: number;
   onChainIndex?: number;
   contractDeadline?: string;
+  releaseTransactionHash?: string;
 }
 
 export interface RevisionProposalMilestone {
