@@ -298,6 +298,7 @@ mod escrow {
         pub freelancer: Address,
         pub token: Address,
         pub total_amount: i128,
+        pub funded_amount: i128,
         pub status: JobStatus,
         pub milestones: Vec<Milestone>,
         pub job_deadline: u64,

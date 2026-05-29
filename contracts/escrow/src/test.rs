@@ -50,9 +50,9 @@ fn pause_escrow(env: &Env, client: &EscrowContractClient<'_>, admin: &Address) {
     client.approve_admin_action(&temp_signer, &proposal_id);
 }
 
-fn unpause_escrow(env: &Env, client: &EscrowContractClient<'_>, admin: &Address) {
-    let proposal_id = client.propose_admin_action(admin, &AdminAction::Unpause);
-    client.approve_admin_action(admin, &proposal_id);
+fn unpause_escrow(_env: &Env, client: &EscrowContractClient<'_>, admin: &Address) {
+    // Unpause has no timelock; with threshold=1, propose_admin_action auto-executes.
+    client.propose_admin_action(admin, &AdminAction::Unpause);
 }
 
 fn setup_multisig(env: &Env) -> (EscrowContractClient<'_>, Address, Address, Address, Address, Address) {
@@ -1390,13 +1390,16 @@ fn test_pause_and_unpause() {
     pause_escrow(&env, &client, &admin);
     unpause_escrow(&env, &client, &admin);
 
+    // pause_escrow advances the clock by 48 h + 1 s (172_801 s).
+    // Use JOB_DEADLINE (1_000_000 s) so both milestone and job deadlines stay in the future.
+    let milestones2 = vec![&env, (String::from_str(&env, "Task 1"), 100_i128, JOB_DEADLINE)];
     let job_id2 = client.create_job(
         &user,
         &freelancer,
         &token,
-        &milestones,
-        &2500_u64,
-        &GRACE_PERIOD, // Correction 5
+        &milestones2,
+        &JOB_DEADLINE, // job_deadline
+        &2500_u64,     // auto_refund_after
     );
     assert_eq!(job_id2, 2);
 }
