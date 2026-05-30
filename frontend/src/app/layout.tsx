@@ -72,6 +72,8 @@ export default function RootLayout({
                   if (!savedTheme && supportDarkMode) savedTheme = 'dark';
                   if (!savedTheme) savedTheme = 'light';
                   document.documentElement.setAttribute('data-theme', savedTheme);
+                  if (savedTheme === 'dark') document.documentElement.classList.add('dark');
+                  else document.documentElement.classList.remove('dark');
                 } catch (e) {}
               })();
             `,

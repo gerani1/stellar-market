@@ -206,13 +206,13 @@ export default function ProposeRevisionModal({
                     return (
                       <li
                         key={idx}
-                        className="flex items-start gap-2 text-sm text-green-600 dark:text-green-400"
+                        className="flex items-start gap-2 text-sm text-theme-success"
                         aria-label={`Added milestone: ${entry.milestone.title}`}
                       >
                         <span className="mt-0.5 font-bold select-none" aria-hidden>+</span>
                         <span>
                           {entry.milestone.title}
-                          <span className="ml-2 text-green-500 text-xs">
+                          <span className="ml-2 text-theme-success text-xs">
                             {entry.milestone.amount.toLocaleString()} XLM
                           </span>
                         </span>
@@ -222,7 +222,7 @@ export default function ProposeRevisionModal({
                   return (
                     <li
                       key={idx}
-                      className="flex items-start gap-2 text-sm text-amber-600 dark:text-amber-400"
+                      className="flex items-start gap-2 text-sm text-theme-warning"
                       aria-label={`Changed milestone: ${entry.title}`}
                     >
                       <span className="mt-0.5 font-bold select-none" aria-hidden>~</span>
@@ -234,18 +234,18 @@ export default function ProposeRevisionModal({
                               {entry.current.amount.toLocaleString()} XLM
                             </span>
                             {" → "}
-                            <span className="text-green-600 dark:text-green-400">
+                            <span className="text-theme-success">
                               {entry.proposed.amount.toLocaleString()} XLM
                             </span>
                           </span>
                         )}
                         {entry.current.deadline !== entry.proposed.deadline && (
                           <span className="ml-2 text-xs">
-                            <span className="line-through text-red-400">
+                            <span className="line-through text-theme-error">
                               {entry.current.deadline.slice(0, 10)}
                             </span>
                             {" → "}
-                            <span className="text-green-600 dark:text-green-400">
+                            <span className="text-theme-success">
                               {entry.proposed.deadline.slice(0, 10)}
                             </span>
                           </span>

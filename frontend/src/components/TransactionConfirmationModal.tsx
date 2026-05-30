@@ -155,7 +155,7 @@ export default function TransactionConfirmationModal({
           )}
 
           {preview?.requiresRestoreFootprint && (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-sm text-amber-500">
+            <div className="rounded-xl border border-theme-warning/30 bg-theme-warning/10 px-4 py-4 text-sm text-theme-warning">
               This transaction needs a restore-footprint step before it can be
               submitted. The current flow only supports direct submission.
             </div>

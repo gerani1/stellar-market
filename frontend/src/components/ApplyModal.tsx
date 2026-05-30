@@ -151,17 +151,17 @@ export default function ApplyModal({
       />
       <div
         ref={modalRef}
-        className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6 mx-4"
+        className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-theme-card border border-theme-border rounded-xl p-6 mx-4"
       >
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-[var(--text-heading)]">
+          <h2 className="text-xl font-bold text-theme-heading">
             Apply for this Job
           </h2>
           <button
             onClick={() => {
               if (!submitting) onClose();
             }}
-            className="text-[var(--text-body)] hover:text-[var(--text-heading)] transition-colors"
+            className="text-theme-text hover:text-theme-heading transition-colors"
             aria-label="Close apply modal"
             disabled={submitting}
           >
@@ -169,12 +169,12 @@ export default function ApplyModal({
           </button>
         </div>
 
-        <p className="text-sm text-[var(--text-body)] mb-6">
+        <p className="text-sm text-theme-body mb-6">
           {job.title} &mdash; {job.budget.toLocaleString()} XLM
         </p>
 
         {error && (
-          <div className="flex items-center gap-2 p-3 mb-4 rounded-lg bg-red-900/40 border border-red-700 text-red-200 text-sm">
+          <div className="flex items-center gap-2 p-3 mb-4 rounded-lg bg-theme-error/10 border border-theme-error/30 text-theme-error text-sm">
             <AlertCircle size={16} className="shrink-0" />
             {error}
           </div>
@@ -182,7 +182,7 @@ export default function ApplyModal({
 
         <div className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-[var(--text-heading)] mb-2">
+            <label className="block text-sm font-medium text-theme-heading mb-2">
               Cover Letter
             </label>
             <div data-color-mode="dark" role="textbox" aria-multiline="true" aria-label="Cover letter editor">
@@ -195,19 +195,19 @@ export default function ApplyModal({
             </div>
             <div className="flex items-center justify-between mt-1">
               {validationErrors.proposal ? (
-                <span className="text-red-400 text-xs">
+                <span className="text-theme-error text-xs">
                   {validationErrors.proposal}
                 </span>
               ) : (
-                <span className="text-xs text-[var(--text-body)]">
+                <span className="text-xs text-theme-body">
                   {MIN_PROPOSAL_LENGTH}–{MAX_PROPOSAL_LENGTH} characters
                 </span>
               )}
               <span
                 className={`text-xs ${
                   plainTextLength < MIN_PROPOSAL_LENGTH || plainTextLength > MAX_PROPOSAL_LENGTH
-                    ? "text-red-400"
-                    : "text-green-400"
+                    ? "text-theme-error"
+                    : "text-theme-success"
                 }`}
               >
                 {plainTextLength} / {MAX_PROPOSAL_LENGTH}
@@ -218,7 +218,7 @@ export default function ApplyModal({
           <div>
             <label
               htmlFor="apply-bid-amount"
-              className="block text-sm font-medium text-[var(--text-heading)] mb-2"
+              className="block text-sm font-medium text-theme-heading mb-2"
             >
               Proposed Budget (XLM)
             </label>
@@ -232,7 +232,7 @@ export default function ApplyModal({
               onChange={(e) => setBidAmount(parseFloat(e.target.value) || 0)}
             />
             {validationErrors.bidAmount && (
-              <span className="text-red-400 text-xs mt-1 block">
+              <span className="text-theme-error text-xs mt-1 block">
                 {validationErrors.bidAmount}
               </span>
             )}
@@ -241,7 +241,7 @@ export default function ApplyModal({
           <div>
             <label
               htmlFor="apply-timeline"
-              className="block text-sm font-medium text-[var(--text-heading)] mb-2"
+              className="block text-sm font-medium text-theme-heading mb-2"
             >
               Estimated Timeline
             </label>
@@ -271,14 +271,14 @@ export default function ApplyModal({
               />
             )}
             {validationErrors.estimatedDuration && (
-              <span className="text-red-400 text-xs mt-1 block">
+              <span className="text-theme-error text-xs mt-1 block">
                 {validationErrors.estimatedDuration}
               </span>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-3 mt-6 pt-4 border-t border-[var(--border)]">
+        <div className="flex items-center gap-3 mt-6 pt-4 border-t border-theme-border">
           <button
             onClick={() => {
               if (!submitting) onClose();

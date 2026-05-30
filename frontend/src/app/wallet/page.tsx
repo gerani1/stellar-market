@@ -133,7 +133,7 @@ function txTypeLabel(type: TransactionType) {
 function txTypeClasses(type: TransactionType) {
   switch (type) {
     case "DEPOSIT":
-      return "bg-amber-500/10 text-amber-500 border-amber-500/30";
+      return "bg-theme-warning/10 text-theme-warning border-theme-warning/30";
     case "RELEASE":
       return "bg-theme-success/10 text-theme-success border-theme-success/30";
     case "REFUND":
@@ -737,7 +737,7 @@ function MetricCard({
 }) {
   const toneClasses: Record<"success" | "warning" | "info" | "neutral", string> = {
     success: "bg-theme-success/10 text-theme-success",
-    warning: "bg-amber-500/10 text-amber-500",
+    warning: "bg-theme-warning/10 text-theme-warning",
     info: "bg-stellar-blue/10 text-stellar-blue",
     neutral: "bg-theme-border/60 text-theme-heading",
   };

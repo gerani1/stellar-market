@@ -241,15 +241,15 @@ function StepThree({ onSkip, role }: { onSkip: () => void; role: string }) {
   const isClient = role === "CLIENT";
   return (
     <div>
-      <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isClient ? "bg-green-500/10" : "bg-stellar-blue/10"}`}>
+      <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isClient ? "bg-theme-success/10" : "bg-stellar-blue/10"}`}>
         {isClient ? (
-          <Briefcase size={24} className="text-green-400" />
+          <Briefcase size={24} className="text-theme-success" />
         ) : (
           <Search size={24} className="text-stellar-blue" />
         )}
       </div>
       <div className="flex items-center gap-2 mb-2">
-        <CheckCircle2 size={20} className="text-green-400" />
+        <CheckCircle2 size={20} className="text-theme-success" />
         <h2 className="text-xl font-bold text-theme-heading">You&apos;re all set!</h2>
       </div>
       <p className="text-theme-text text-sm mb-6">
