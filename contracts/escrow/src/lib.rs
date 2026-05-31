@@ -216,8 +216,8 @@ enum DataKey {
     AllowedTokens,
     RevisionProposal(u64),
     ProposalExpiry,
-    MultiSigSigners,     // Vec<Address>
-    MultiSigThreshold,   // u32
+    MultiSigSigners,   // Vec<Address>
+    MultiSigThreshold, // u32
     MultiSigProposal(u64),
     MultiSigProposalCount,
     MultiSigExecutionNotBefore(u64),
@@ -251,28 +251,34 @@ fn require_not_paused(env: &Env) -> Result<(), EscrowError> {
 
 /// Validates that every address in `callers` is a registered signer.
 fn is_signer(env: &Env, address: &Address) -> bool {
-    if let Some(signers) = env.storage().instance().get::<_, Vec<Address>>(&DataKey::MultiSigSigners) {
+    if let Some(signers) = env
+        .storage()
+        .instance()
+        .get::<_, Vec<Address>>(&DataKey::MultiSigSigners)
+    {
         signers.iter().any(|s| s == *address)
     } else {
         false
     }
 }
 
-const MIN_TTL_THRESHOLD: u32 = 1_000;
-const MIN_TTL_EXTEND_TO: u32 = 10_000;
+// Production TTL constants based on Stellar's ~5-second ledger close time
+const LEDGERS_PER_DAY: u32 = 17_280; // 86,400 seconds/day ÷ 5 seconds/ledger
+const TTL_THRESHOLD_LEDGERS: u32 = LEDGERS_PER_DAY * 15; // 15 days = 259,200 ledgers
+const TTL_EXTEND_TO_LEDGERS: u32 = LEDGERS_PER_DAY * 30; // 30 days = 518,400 ledgers
 
 fn bump_job_ttl(env: &Env, job_id: u64) {
     env.storage().persistent().extend_ttl(
         &get_job_key(job_id),
-        MIN_TTL_THRESHOLD,
-        MIN_TTL_EXTEND_TO,
+        TTL_THRESHOLD_LEDGERS,
+        TTL_EXTEND_TO_LEDGERS,
     );
 }
 
 fn bump_job_count_ttl(env: &Env) {
     env.storage()
         .instance()
-        .extend_ttl(MIN_TTL_THRESHOLD, MIN_TTL_EXTEND_TO);
+        .extend_ttl(TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
 }
 
 #[contract]
@@ -299,16 +305,24 @@ impl EscrowContract {
             return Err(EscrowError::InvalidThreshold);
         }
 
-        env.storage().instance().set(&DataKey::MultiSigSigners, &signers);
-        env.storage().instance().set(&DataKey::MultiSigThreshold, &threshold);
-        
+        env.storage()
+            .instance()
+            .set(&DataKey::MultiSigSigners, &signers);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultiSigThreshold, &threshold);
+
         env.storage()
             .instance()
             .set(&symbol_short!("TRE"), &treasury);
-        env.storage().instance().set(&symbol_short!("FEE"), &fee_bps);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("FEE"), &fee_bps);
         env.storage().instance().set(&DataKey::Paused, &false);
         let allowed_tokens: Vec<Address> = Vec::new(&env);
-        env.storage().instance().set(&DataKey::AllowedTokens, &allowed_tokens);
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowedTokens, &allowed_tokens);
         env.storage()
             .instance()
             .set(&DataKey::ProposalExpiry, &proposal_expiry_secs);
@@ -317,11 +331,7 @@ impl EscrowContract {
         Ok(())
     }
 
-    pub fn add_allowed_token(
-        env: Env,
-        admin: Address,
-        token: Address,
-    ) -> Result<(), EscrowError> {
+    pub fn add_allowed_token(env: Env, admin: Address, token: Address) -> Result<(), EscrowError> {
         admin.require_auth();
         if !is_signer(&env, &admin) {
             return Err(EscrowError::NotAdmin);
@@ -334,7 +344,9 @@ impl EscrowContract {
             .unwrap_or(Vec::new(&env));
         if !allowed.iter().any(|t| t == token) {
             allowed.push_back(token.clone());
-            env.storage().instance().set(&DataKey::AllowedTokens, &allowed);
+            env.storage()
+                .instance()
+                .set(&DataKey::AllowedTokens, &allowed);
         }
         Ok(())
     }
@@ -356,7 +368,9 @@ impl EscrowContract {
             .unwrap_or(Vec::new(&env));
         if let Some(index) = allowed.iter().position(|t| t == token) {
             allowed.remove(index as u32);
-            env.storage().instance().set(&DataKey::AllowedTokens, &allowed);
+            env.storage()
+                .instance()
+                .set(&DataKey::AllowedTokens, &allowed);
         }
         Ok(())
     }
@@ -368,8 +382,6 @@ impl EscrowContract {
             .unwrap_or(Vec::new(&env))
     }
 
-
-
     /// Check if the contract is paused.
     pub fn is_paused(env: Env) -> bool {
         env.storage()
@@ -378,15 +390,23 @@ impl EscrowContract {
             .unwrap_or(false)
     }
 
-    pub fn propose_admin_action(env: Env, proposer: Address, action: AdminAction) -> Result<u64, EscrowError> {
+    pub fn propose_admin_action(
+        env: Env,
+        proposer: Address,
+        action: AdminAction,
+    ) -> Result<u64, EscrowError> {
         proposer.require_auth();
         if !is_signer(&env, &proposer) {
             return Err(EscrowError::SignerNotFound);
         }
 
-        let mut count: u64 = env.storage().instance().get(&DataKey::MultiSigProposalCount).unwrap_or(0);
+        let mut count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultiSigProposalCount)
+            .unwrap_or(0);
         count += 1;
-        
+
         let mut approvals = Vec::new(&env);
         approvals.push_back(proposer.clone());
 
@@ -407,11 +427,16 @@ impl EscrowContract {
             created_at: now,
         };
 
-        env.storage().instance().set(&DataKey::MultiSigProposal(count), &proposal);
-        env.storage().instance().set(&DataKey::MultiSigProposalCount, &count);
         env.storage()
             .instance()
-            .set(&DataKey::MultiSigExecutionNotBefore(count), &execution_not_before);
+            .set(&DataKey::MultiSigProposal(count), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultiSigProposalCount, &count);
+        env.storage().instance().set(
+            &DataKey::MultiSigExecutionNotBefore(count),
+            &execution_not_before,
+        );
 
         env.events().publish(
             (symbol_short!("msig"), symbol_short!("proposed")),
@@ -419,7 +444,11 @@ impl EscrowContract {
         );
 
         // Auto-execute if threshold is 1 and time-lock not active
-        let threshold: u32 = env.storage().instance().get(&DataKey::MultiSigThreshold).unwrap_or(1);
+        let threshold: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultiSigThreshold)
+            .unwrap_or(1);
         if threshold == 1 && now >= execution_not_before {
             Self::execute_proposal_internal(&env, count)?;
         }
@@ -427,13 +456,20 @@ impl EscrowContract {
         Ok(count)
     }
 
-    pub fn approve_admin_action(env: Env, approver: Address, proposal_id: u64) -> Result<(), EscrowError> {
+    pub fn approve_admin_action(
+        env: Env,
+        approver: Address,
+        proposal_id: u64,
+    ) -> Result<(), EscrowError> {
         approver.require_auth();
         if !is_signer(&env, &approver) {
             return Err(EscrowError::SignerNotFound);
         }
 
-        let mut proposal: MultiSigProposal = env.storage().instance().get(&DataKey::MultiSigProposal(proposal_id))
+        let mut proposal: MultiSigProposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultiSigProposal(proposal_id))
             .ok_or(EscrowError::MultiSigProposalNotFound)?;
 
         if proposal.executed {
@@ -449,14 +485,20 @@ impl EscrowContract {
         }
 
         proposal.approvals.push_back(approver.clone());
-        env.storage().instance().set(&DataKey::MultiSigProposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultiSigProposal(proposal_id), &proposal);
 
         env.events().publish(
             (symbol_short!("msig"), symbol_short!("approved")),
             (proposal_id, approver),
         );
 
-        let threshold: u32 = env.storage().instance().get(&DataKey::MultiSigThreshold).unwrap_or(1);
+        let threshold: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultiSigThreshold)
+            .unwrap_or(1);
         if proposal.approvals.len() >= threshold {
             let not_before: u64 = env
                 .storage()
@@ -471,7 +513,11 @@ impl EscrowContract {
         Ok(())
     }
 
-    pub fn execute_proposal(env: Env, caller: Address, proposal_id: u64) -> Result<(), EscrowError> {
+    pub fn execute_proposal(
+        env: Env,
+        caller: Address,
+        proposal_id: u64,
+    ) -> Result<(), EscrowError> {
         caller.require_auth();
         if !is_signer(&env, &caller) {
             return Err(EscrowError::SignerNotFound);
@@ -480,7 +526,10 @@ impl EscrowContract {
     }
 
     fn execute_proposal_internal(env: &Env, proposal_id: u64) -> Result<(), EscrowError> {
-        let mut proposal: MultiSigProposal = env.storage().instance().get(&DataKey::MultiSigProposal(proposal_id))
+        let mut proposal: MultiSigProposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultiSigProposal(proposal_id))
             .ok_or(EscrowError::MultiSigProposalNotFound)?;
 
         if proposal.executed {
@@ -491,7 +540,11 @@ impl EscrowContract {
             return Err(EscrowError::ProposalExpired);
         }
 
-        let threshold: u32 = env.storage().instance().get(&DataKey::MultiSigThreshold).unwrap_or(1);
+        let threshold: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultiSigThreshold)
+            .unwrap_or(1);
         if proposal.approvals.len() < threshold {
             return Err(EscrowError::Unauthorized);
         }
@@ -509,8 +562,8 @@ impl EscrowContract {
             AdminAction::Pause => {
                 env.storage().instance().set(&DataKey::Paused, &true);
                 env.events().publish(
-                   (symbol_short!("paused"),),
-                   (env.current_contract_address(), env.ledger().timestamp()),
+                    (symbol_short!("paused"),),
+                    (env.current_contract_address(), env.ledger().timestamp()),
                 );
             }
             AdminAction::Unpause => {
@@ -527,39 +580,69 @@ impl EscrowContract {
                 env.storage().instance().set(&symbol_short!("FEE"), &fee);
             }
             AdminAction::SetTreasury(treasury) => {
-                env.storage().instance().set(&symbol_short!("TRE"), &treasury);
+                env.storage()
+                    .instance()
+                    .set(&symbol_short!("TRE"), &treasury);
             }
             AdminAction::AddSigner(signer) => {
-                let mut signers: Vec<Address> = env.storage().instance().get(&DataKey::MultiSigSigners).unwrap();
+                let mut signers: Vec<Address> = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::MultiSigSigners)
+                    .unwrap();
                 if !signers.iter().any(|s| s == signer) {
                     signers.push_back(signer);
-                    env.storage().instance().set(&DataKey::MultiSigSigners, &signers);
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::MultiSigSigners, &signers);
                 }
             }
             AdminAction::RemoveSigner(signer) => {
-                let mut signers: Vec<Address> = env.storage().instance().get(&DataKey::MultiSigSigners).unwrap();
-                let threshold: u32 = env.storage().instance().get(&DataKey::MultiSigThreshold).unwrap_or(1);
-                
+                let mut signers: Vec<Address> = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::MultiSigSigners)
+                    .unwrap();
+                let threshold: u32 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::MultiSigThreshold)
+                    .unwrap_or(1);
+
                 if let Some(idx) = signers.iter().position(|s| s == signer) {
                     if signers.len() <= threshold {
                         return Err(EscrowError::InvalidThreshold);
                     }
                     signers.remove(idx as u32);
-                    env.storage().instance().set(&DataKey::MultiSigSigners, &signers);
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::MultiSigSigners, &signers);
                 }
             }
             AdminAction::ChangeThreshold(new_threshold) => {
-                let signers: Vec<Address> = env.storage().instance().get(&DataKey::MultiSigSigners).unwrap();
+                let signers: Vec<Address> = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::MultiSigSigners)
+                    .unwrap();
                 if new_threshold == 0 || new_threshold > signers.len() {
                     return Err(EscrowError::InvalidThreshold);
                 }
-                env.storage().instance().set(&DataKey::MultiSigThreshold, &new_threshold);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::MultiSigThreshold, &new_threshold);
             }
             AdminAction::RotateSigner(old_signer, new_signer) => {
-                let mut signers: Vec<Address> = env.storage().instance().get(&DataKey::MultiSigSigners).unwrap();
+                let mut signers: Vec<Address> = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::MultiSigSigners)
+                    .unwrap();
                 if let Some(idx) = signers.iter().position(|s| s == old_signer) {
                     signers.set(idx as u32, new_signer);
-                    env.storage().instance().set(&DataKey::MultiSigSigners, &signers);
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::MultiSigSigners, &signers);
                 } else {
                     return Err(EscrowError::SignerNotFound);
                 }
@@ -622,7 +705,9 @@ impl EscrowContract {
         }
 
         proposal.executed = true;
-        env.storage().instance().set(&DataKey::MultiSigProposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultiSigProposal(proposal_id), &proposal);
         if env
             .storage()
             .instance()
@@ -657,8 +742,8 @@ impl EscrowContract {
         let allowed_tokens = Self::get_allowed_tokens(env.clone());
         if !allowed_tokens.is_empty()
             && !allowed_tokens
-            .iter()
-            .any(|allowed| allowed == token.clone())
+                .iter()
+                .any(|allowed| allowed == token.clone())
         {
             return Err(EscrowError::TokenNotAllowed);
         }
@@ -851,7 +936,7 @@ impl EscrowContract {
         resolution: DisputeResolution,
     ) -> Result<(), EscrowError> {
         require_not_paused(&env)?;
-        
+
         let mut job: Job = env
             .storage()
             .persistent()
@@ -933,11 +1018,7 @@ impl EscrowContract {
                         .instance()
                         .get(&symbol_short!("TRE"))
                         .unwrap_or(job.client.clone());
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &treasury,
-                        &remaining,
-                    );
+                    token_client.transfer(&env.current_contract_address(), &treasury, &remaining);
                     job.status = JobStatus::Cancelled;
                 }
             }
@@ -961,6 +1042,7 @@ impl EscrowContract {
         }
 
         env.storage().persistent().set(&get_job_key(job_id), &job);
+        bump_job_ttl(&env, job_id);
 
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("dispute")),
@@ -1032,8 +1114,8 @@ impl EscrowContract {
             .set(&submitted_key, &env.ledger().timestamp());
         env.storage().persistent().extend_ttl(
             &submitted_key,
-            MIN_TTL_THRESHOLD,
-            MIN_TTL_EXTEND_TO,
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
         );
 
         let auto_key = DataKey::InactivityAutoApproveAt(job_id, milestone_id);
@@ -1081,7 +1163,11 @@ impl EscrowContract {
         // Release payment for this milestone
         let token_client = token::Client::new(&env, &job.token);
 
-        let fee_bps: u32 = env.storage().instance().get(&symbol_short!("FEE")).unwrap_or(0);
+        let fee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("FEE"))
+            .unwrap_or(0);
         let treasury: Address = env
             .storage()
             .instance()
@@ -1140,7 +1226,13 @@ impl EscrowContract {
         // Emit milestone approved event
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("milestone")),
-            (job_id, milestone_id, client, job.freelancer.clone(), milestone.amount),
+            (
+                job_id,
+                milestone_id,
+                client,
+                job.freelancer.clone(),
+                milestone.amount,
+            ),
         );
 
         // Emit PaymentReleased event when job reaches Completed status
@@ -1227,7 +1319,11 @@ impl EscrowContract {
         if total_released > 0 {
             let token_client = token::Client::new(&env, &job.token);
 
-            let fee_bps: u32 = env.storage().instance().get(&symbol_short!("FEE")).unwrap_or(0);
+            let fee_bps: u32 = env
+                .storage()
+                .instance()
+                .get(&symbol_short!("FEE"))
+                .unwrap_or(0);
             let treasury: Address = env
                 .storage()
                 .instance()
@@ -1270,7 +1366,13 @@ impl EscrowContract {
         // Emit batch approval event
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("batch")),
-            (job_id, milestone_indices, total_released, job.client.clone(), job.freelancer.clone()),
+            (
+                job_id,
+                milestone_indices,
+                total_released,
+                job.client.clone(),
+                job.freelancer.clone(),
+            ),
         );
 
         // Emit PaymentReleased event when job reaches Completed status
@@ -1328,13 +1430,11 @@ impl EscrowContract {
 
         let auto_approve_at = now.saturating_add(INACTIVITY_GRACE_SECS);
         let auto_key = DataKey::InactivityAutoApproveAt(job_id, milestone_id);
-        env.storage()
-            .persistent()
-            .set(&auto_key, &auto_approve_at);
+        env.storage().persistent().set(&auto_key, &auto_approve_at);
         env.storage().persistent().extend_ttl(
             &auto_key,
-            MIN_TTL_THRESHOLD,
-            MIN_TTL_EXTEND_TO,
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
         );
 
         env.events().publish(
@@ -1404,7 +1504,11 @@ impl EscrowContract {
         // Release payment for this milestone (same logic as client approval).
         let token_client = token::Client::new(&env, &job.token);
 
-        let fee_bps: u32 = env.storage().instance().get(&symbol_short!("FEE")).unwrap_or(0);
+        let fee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("FEE"))
+            .unwrap_or(0);
         let treasury: Address = env
             .storage()
             .instance()
@@ -1638,10 +1742,9 @@ impl EscrowContract {
 
         // Guard: reject cancellation if any milestone is actively InProgress or Submitted.
         // The client must open a dispute for in-flight work instead.
-        let work_started = job
-            .milestones
-            .iter()
-            .any(|m| m.status == MilestoneStatus::InProgress || m.status == MilestoneStatus::Submitted);
+        let work_started = job.milestones.iter().any(|m| {
+            m.status == MilestoneStatus::InProgress || m.status == MilestoneStatus::Submitted
+        });
         if work_started {
             return Err(EscrowError::WorkInProgress);
         }
@@ -1864,8 +1967,8 @@ impl EscrowContract {
         // Extend TTL
         env.storage().persistent().extend_ttl(
             &DataKey::RevisionProposal(job_id),
-            MIN_TTL_THRESHOLD,
-            MIN_TTL_EXTEND_TO,
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
         );
 
         // 7. Emit event
@@ -1962,8 +2065,8 @@ impl EscrowContract {
             .set(&DataKey::RevisionHistory(job_id), &history);
         env.storage().persistent().extend_ttl(
             &DataKey::RevisionHistory(job_id),
-            MIN_TTL_THRESHOLD,
-            MIN_TTL_EXTEND_TO,
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
         );
 
         // 5. Compute balance delta
@@ -2010,6 +2113,11 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .set(&DataKey::RevisionProposal(job_id), &proposal);
+        env.storage().persistent().extend_ttl(
+            &DataKey::RevisionProposal(job_id),
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
 
         // 10. Emit event
         env.events().publish(
@@ -2074,10 +2182,17 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .set(&DataKey::RevisionProposal(job_id), &proposal);
+        env.storage().persistent().extend_ttl(
+            &DataKey::RevisionProposal(job_id),
+            TTL_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
 
         // 5. Emit event
-        env.events()
-            .publish((Symbol::new(&env, "revision_rejected"),), (job_id, caller, job.client, job.freelancer));
+        env.events().publish(
+            (Symbol::new(&env, "revision_rejected"),),
+            (job_id, caller, job.client, job.freelancer),
+        );
 
         Ok(())
     }
@@ -2100,7 +2215,11 @@ impl EscrowContract {
     /// * `RevisionProposalNotFound` — if no proposal exists
     /// * `ProposalNotPending` — if the proposal is not Pending
     /// * `NotAuthorizedForProposalAction` — if caller is not the original proposer
-    pub fn cancel_revision_proposal(env: Env, caller: Address, job_id: u64) -> Result<(), EscrowError> {
+    pub fn cancel_revision_proposal(
+        env: Env,
+        caller: Address,
+        job_id: u64,
+    ) -> Result<(), EscrowError> {
         caller.require_auth();
 
         // 1. Load job
@@ -2282,7 +2401,7 @@ impl EscrowContract {
         new_deadline: u64,
     ) -> Result<(), EscrowError> {
         require_not_paused(&env)?;
-        
+
         let mut job: Job = env
             .storage()
             .persistent()
@@ -2306,12 +2425,50 @@ impl EscrowContract {
 
         job.milestones = milestones;
         env.storage().persistent().set(&get_job_key(job_id), &job);
+        bump_job_ttl(&env, job_id);
 
         // Emit deadline extension event
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("deadline")),
             (job_id, milestone_id, new_deadline),
         );
+
+        Ok(())
+    }
+
+    /// Permissionless function to extend the TTL of an escrow's persistent storage.
+    ///
+    /// This function allows anyone to extend the TTL of an escrow's storage to prevent
+    /// it from being archived by Soroban's rent mechanism. This is particularly useful
+    /// for long-running escrows that may approach their TTL expiry.
+    ///
+    /// # Arguments
+    /// * `escrow_id` — The unique identifier of the escrow (job) to bump
+    ///
+    /// # Behavior
+    /// - Verifies the escrow exists by reading it from persistent storage
+    /// - Extends the TTL of the escrow's storage key to TTL_EXTEND_TO_LEDGERS (~30 days)
+    /// - Can be called for escrows in any state, including terminal states (Completed, Cancelled, Expired)
+    /// - Does not modify any escrow state or emit events
+    ///
+    /// # Errors
+    /// * `JobNotFound` — if no escrow exists with the given ID
+    ///
+    /// # Notes
+    /// - This function is intentionally permissionless to allow anyone to maintain storage
+    /// - Terminal escrows may still need TTL extension for historical/audit purposes
+    /// - Only extends the main job storage key; ephemeral keys (proposals, timestamps) are
+    ///   extended by their respective functions when accessed
+    pub fn bump_escrow(env: Env, escrow_id: u64) -> Result<(), EscrowError> {
+        // Verify the escrow exists
+        let _job: Job = env
+            .storage()
+            .persistent()
+            .get(&get_job_key(escrow_id))
+            .ok_or(EscrowError::JobNotFound)?;
+
+        // Extend TTL for the escrow storage key
+        bump_job_ttl(&env, escrow_id);
 
         Ok(())
     }
