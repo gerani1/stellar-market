@@ -103,6 +103,67 @@ pub struct MultiSigProposal {
     pub created_at: u64,
 }
 
+/// # Escrow State Machine
+///
+/// The escrow contract enforces a strict state machine to ensure valid transitions
+/// and prevent invalid operations. Each state has specific allowed transitions:
+///
+/// ```text
+/// ┌─────────┐
+/// │ Created │ ──fund_job──> ┌────────┐
+/// └─────────┘               │ Funded │
+///                           └────────┘
+///                                │
+///                                │ submit_milestone
+///                                ▼
+///                          ┌────────────┐
+///                          │ InProgress │
+///                          └────────────┘
+///                                │
+///                    ┌───────────┼───────────┐
+///                    │           │           │
+///         approve_milestone   dispute    expire_job
+///                    │           │           │
+///                    ▼           ▼           ▼
+///              ┌───────────┐ ┌──────────┐ ┌─────────┐
+///              │ Completed │ │ Disputed │ │ Expired │
+///              └───────────┘ └──────────┘ └─────────┘
+///                                │
+///                    resolve_dispute_callback
+///                                │
+///                    ┌───────────┴───────────┐
+///                    ▼                       ▼
+///              ┌───────────┐           ┌───────────┐
+///              │ Completed │           │ Cancelled │
+///              └───────────┘           └───────────┘
+/// ```
+///
+/// ## State Descriptions
+///
+/// - **Created**: Job has been created but not yet funded. Only `fund_job` is allowed.
+/// - **Funded**: Escrow is funded. Freelancer can start work via `submit_milestone`.
+/// - **InProgress**: Work has begun. Milestones can be submitted, approved, or disputed.
+/// - **Completed**: All milestones approved and payments released. Terminal state.
+/// - **Disputed**: A dispute has been raised. Only dispute resolution can change state.
+/// - **Cancelled**: Job was cancelled or refunded. Terminal state.
+/// - **Expired**: Job deadline passed without completion. Terminal state.
+///
+/// ## Transition Rules
+///
+/// | From State  | To State    | Trigger Function              | Conditions                          |
+/// |-------------|-------------|-------------------------------|-------------------------------------|
+/// | Created     | Funded      | `fund_job`                    | Client transfers full amount        |
+/// | Funded      | InProgress  | `submit_milestone`            | Freelancer submits first milestone  |
+/// | Funded      | Cancelled   | `cancel_job`                  | No work started, client cancels     |
+/// | Funded      | Expired     | `expire_job`                  | Deadline passed                     |
+/// | InProgress  | Completed   | `approve_milestone`           | All milestones approved             |
+/// | InProgress  | Disputed    | External dispute contract     | Either party raises dispute         |
+/// | InProgress  | Cancelled   | `cancel_job`                  | No active work, client cancels      |
+/// | InProgress  | Expired     | `expire_job`                  | Deadline passed                     |
+/// | Disputed    | Completed   | `resolve_dispute_callback`    | Resolution favors freelancer        |
+/// | Disputed    | Cancelled   | `resolve_dispute_callback`    | Resolution favors client            |
+///
+/// Terminal states (Completed, Cancelled, Expired) cannot transition to any other state.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum JobStatus {
@@ -279,6 +340,85 @@ fn bump_job_count_ttl(env: &Env) {
     env.storage()
         .instance()
         .extend_ttl(TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
+}
+
+// ============================================================
+// STATE MACHINE VALIDATION
+// ============================================================
+// These functions enforce the escrow state machine by validating
+// that state transitions are legal before any mutation occurs.
+// Each function returns EscrowError::InvalidState if the current
+// state does not permit the requested operation.
+// ============================================================
+
+/// Validates that the job is in Created state (ready to be funded).
+fn require_state_created(job: &Job) -> Result<(), EscrowError> {
+    if job.status != JobStatus::Created {
+        return Err(EscrowError::InvalidStatus);
+    }
+    Ok(())
+}
+
+/// Validates that the job is in Funded or InProgress state (work can proceed).
+fn require_state_funded_or_in_progress(job: &Job) -> Result<(), EscrowError> {
+    if job.status != JobStatus::Funded && job.status != JobStatus::InProgress {
+        return Err(EscrowError::InvalidStatus);
+    }
+    Ok(())
+}
+
+/// Validates that the job is NOT in a terminal state (Completed, Cancelled, Expired).
+/// Terminal states cannot transition to any other state.
+fn require_state_not_terminal(job: &Job) -> Result<(), EscrowError> {
+    if job.status == JobStatus::Completed
+        || job.status == JobStatus::Cancelled
+        || job.status == JobStatus::Expired
+    {
+        return Err(EscrowError::InvalidStatus);
+    }
+    Ok(())
+}
+
+/// Validates that the job is NOT disputed.
+/// Most operations are blocked during active disputes.
+fn require_state_not_disputed(job: &Job) -> Result<(), EscrowError> {
+    if job.status == JobStatus::Disputed {
+        return Err(EscrowError::InvalidStatus);
+    }
+    Ok(())
+}
+
+/// Validates that the job is in a state that can be disputed.
+/// Only Funded, InProgress, or already Disputed jobs can have dispute operations.
+fn require_state_disputable(job: &Job) -> Result<(), EscrowError> {
+    if job.status != JobStatus::Funded
+        && job.status != JobStatus::InProgress
+        && job.status != JobStatus::Disputed
+    {
+        return Err(EscrowError::InvalidStatus);
+    }
+    Ok(())
+}
+
+/// Validates that the job is in a state that can be cancelled.
+/// Only Funded or InProgress jobs can be cancelled (and only if no work is in progress).
+fn require_state_cancellable(job: &Job) -> Result<(), EscrowError> {
+    if job.status != JobStatus::Funded && job.status != JobStatus::InProgress {
+        return Err(EscrowError::InvalidStatus);
+    }
+    Ok(())
+}
+
+/// Validates that the job is in a state that can expire.
+/// Jobs in Created, Completed, Cancelled, or Expired states cannot expire.
+fn require_state_expirable(job: &Job) -> Result<(), EscrowError> {
+    if job.status == JobStatus::Completed
+        || job.status == JobStatus::Cancelled
+        || job.status == JobStatus::Expired
+    {
+        return Err(EscrowError::InvalidStatus);
+    }
+    Ok(())
 }
 
 #[contract]
@@ -833,9 +973,9 @@ impl EscrowContract {
         if job.client != client {
             return Err(EscrowError::Unauthorized);
         }
-        if job.status != JobStatus::Created {
-            return Err(EscrowError::AlreadyFunded);
-        }
+        
+        // STATE VALIDATION: Job must be in Created state to be funded
+        require_state_created(&job)?;
 
         // Validate that total_amount matches the sum of stored milestone amounts.
         // Guards against any inconsistency between the two fields (e.g. from a
@@ -899,9 +1039,8 @@ impl EscrowContract {
             return Err(EscrowError::Unauthorized);
         }
 
-        if job.status != JobStatus::Funded && job.status != JobStatus::InProgress {
-            return Err(EscrowError::InvalidStatus);
-        }
+        // STATE VALIDATION: Job must be Funded or InProgress to top up
+        require_state_funded_or_in_progress(&job)?;
 
         let new_funded = job
             .funded_amount
@@ -943,12 +1082,8 @@ impl EscrowContract {
             .get(&get_job_key(job_id))
             .ok_or(EscrowError::JobNotFound)?;
 
-        if job.status == JobStatus::Created
-            || job.status == JobStatus::Completed
-            || job.status == JobStatus::Cancelled
-        {
-            return Err(EscrowError::InvalidStatus);
-        }
+        // STATE VALIDATION: Job must be in a disputable state
+        require_state_disputable(&job)?;
 
         let approved_amount: i128 = job
             .milestones
@@ -1072,12 +1207,10 @@ impl EscrowContract {
         if job.freelancer != freelancer {
             return Err(EscrowError::Unauthorized);
         }
-        if job.status != JobStatus::Funded && job.status != JobStatus::InProgress {
-            return Err(EscrowError::InvalidStatus);
-        }
-        if job.status == JobStatus::Disputed {
-            return Err(EscrowError::InvalidStatus);
-        }
+        
+        // STATE VALIDATION: Job must be Funded or InProgress, and not disputed
+        require_state_funded_or_in_progress(&job)?;
+        require_state_not_disputed(&job)?;
 
         let mut milestones = job.milestones.clone();
         let milestone = milestones
@@ -1147,9 +1280,8 @@ impl EscrowContract {
             return Err(EscrowError::Unauthorized);
         }
 
-        if job.status == JobStatus::Disputed {
-            return Err(EscrowError::InvalidStatus);
-        }
+        // STATE VALIDATION: Cannot approve milestones while disputed
+        require_state_not_disputed(&job)?;
 
         let mut milestones = job.milestones.clone();
         let milestone = milestones
@@ -1269,9 +1401,8 @@ impl EscrowContract {
             return Err(EscrowError::Unauthorized);
         }
 
-        if job.status == JobStatus::Disputed {
-            return Err(EscrowError::InvalidStatus);
-        }
+        // STATE VALIDATION: Cannot approve milestones while disputed
+        require_state_not_disputed(&job)?;
 
         // Validate all milestone indices before making any state changes
         let mut milestones = job.milestones.clone();
@@ -1467,9 +1598,8 @@ impl EscrowContract {
             return Err(EscrowError::Unauthorized);
         }
 
-        if job.status == JobStatus::Disputed {
-            return Err(EscrowError::InvalidStatus);
-        }
+        // STATE VALIDATION: Cannot finalize inactivity approval while disputed
+        require_state_not_disputed(&job)?;
 
         let mut milestones = job.milestones.clone();
         let milestone = milestones
@@ -1602,9 +1732,9 @@ impl EscrowContract {
         if job.client != client {
             return Err(EscrowError::Unauthorized);
         }
-        if job.status == JobStatus::Disputed {
-            return Err(EscrowError::InvalidStatus);
-        }
+        
+        // STATE VALIDATION: Cannot release partial payment while disputed
+        require_state_not_disputed(&job)?;
 
         let mut milestones = job.milestones.clone();
         let milestone = milestones
@@ -1730,15 +1860,10 @@ impl EscrowContract {
             return Err(EscrowError::Unauthorized);
         }
 
-        // Cancellation is allowed while the job is Funded or InProgress.
-        if job.status != JobStatus::Funded && job.status != JobStatus::InProgress {
-            return Err(EscrowError::InvalidStatus);
-        }
-
-        // Additional guard: explicitly reject if Disputed (though covered by above, for clarity as per issue)
-        if job.status == JobStatus::Disputed {
-            return Err(EscrowError::InvalidStatus);
-        }
+        // STATE VALIDATION: Job must be in a cancellable state (Funded or InProgress)
+        require_state_cancellable(&job)?;
+        // Additional guard: explicitly reject if Disputed
+        require_state_not_disputed(&job)?;
 
         // Guard: reject cancellation if any milestone is actively InProgress or Submitted.
         // The client must open a dispute for in-flight work instead.
@@ -1793,10 +1918,8 @@ impl EscrowContract {
             return Err(EscrowError::Unauthorized);
         }
 
-        // Only allow refund for Funded or InProgress jobs
-        if job.status != JobStatus::Funded && job.status != JobStatus::InProgress {
-            return Err(EscrowError::InvalidStatus);
-        }
+        // STATE VALIDATION: Only allow refund for Funded or InProgress jobs
+        require_state_funded_or_in_progress(&job)?;
 
         // Ensure the grace period after deadline has elapsed
         let refund_eligible_at = job.job_deadline + job.auto_refund_after;
@@ -2319,12 +2442,8 @@ impl EscrowContract {
             return Err(EscrowError::DeadlineNotPassed);
         }
 
-        if job.status == JobStatus::Completed
-            || job.status == JobStatus::Cancelled
-            || job.status == JobStatus::Expired
-        {
-            return Err(EscrowError::InvalidStatus);
-        }
+        // STATE VALIDATION: Job must be in an expirable state (not terminal)
+        require_state_expirable(&job)?;
 
         // Refund remaining escrowed balance (total minus already-approved milestones).
         let approved_amount: i128 = job
