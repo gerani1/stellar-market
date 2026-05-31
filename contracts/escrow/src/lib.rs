@@ -2476,3 +2476,6 @@ impl EscrowContract {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod fuzz;
