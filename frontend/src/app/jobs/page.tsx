@@ -229,13 +229,17 @@ function JobsContent() {
         <Search
           className="absolute left-3 top-1/2 -translate-y-1/2 text-theme-text"
           size={18}
+          aria-hidden="true"
         />
+        <label htmlFor="search-jobs" className="sr-only">Search jobs by keyword</label>
         <input
+          id="search-jobs"
           type="text"
           placeholder="Search jobs..."
           className="input-field pl-10"
           value={filters.search}
           onChange={(e) => updateSearch(e.target.value)}
+          aria-label="Search jobs by keyword"
         />
       </div>
 
@@ -268,7 +272,7 @@ function JobsContent() {
 
           {/* Results count */}
           {!loading && (
-            <p className="text-sm text-theme-text mb-4">
+            <p className="text-sm text-theme-text mb-4" aria-live="polite" aria-atomic="true">
               {total} job{total !== 1 ? "s" : ""} found
             </p>
           )}
@@ -334,23 +338,25 @@ function JobsContent() {
               )}
             </>
           ) : (
-            <EmptyState
-              icon={Briefcase}
-              title="No jobs found matching your filters."
-              description="Try adjusting or clearing your filters to broaden the search."
-              action={
-                user?.role === "CLIENT"
-                  ? { label: "Post a Job", href: "/post-job" }
-                  : activeCount > 0
-                  ? { label: "Clear Filters", onClick: clearAll }
-                  : undefined
-              }
-              secondaryAction={
-                user?.role === "CLIENT" && activeCount > 0
-                  ? { label: "Clear Filters", onClick: clearAll }
-                  : undefined
-              }
-            />
+            <div role="status" aria-live="polite">
+              <EmptyState
+                icon={Briefcase}
+                title="No jobs found matching your filters."
+                description="Try adjusting or clearing your filters to broaden the search."
+                action={
+                  user?.role === "CLIENT"
+                    ? { label: "Post a Job", href: "/post-job" }
+                    : activeCount > 0
+                    ? { label: "Clear Filters", onClick: clearAll }
+                    : undefined
+                }
+                secondaryAction={
+                  user?.role === "CLIENT" && activeCount > 0
+                    ? { label: "Clear Filters", onClick: clearAll }
+                    : undefined
+                }
+              />
+            </div>
           )}
         </div>
       </div>
