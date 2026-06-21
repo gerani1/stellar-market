@@ -891,10 +891,10 @@ impl DisputeContract {
             .set(&DataKey::DisputeTally(count), &new_tally());
         bump_dispute_tally_ttl(&env, count);
 
-        // Initialize empty arbitrator list
+        // Store assigned arbitrators for this dispute
         env.storage()
             .persistent()
-            .set(&DataKey::Arbitrators(count), &Vec::<Address>::new(&env));
+            .set(&DataKey::Arbitrators(count), &assigned_arbitrators);
         bump_arbitrators_ttl(&env, count);
 
         // Maintain job → dispute_id mapping so callers can look up a dispute by job_id
