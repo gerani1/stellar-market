@@ -9,6 +9,7 @@ import { validate } from "../middleware/validation";
 import { DisputeService } from "../services/dispute.service";
 import { upload, UPLOAD_DIR } from "../config/upload";
 import { validateFileMimeType, formatFileSize } from "../utils/fileValidation";
+import { config } from "../config";
 import {
   confirmDisputeTransactionSchema,
   createDisputeSchema,
@@ -21,6 +22,17 @@ import {
 } from "../schemas/dispute";
 
 const prisma = new PrismaClient();
+
+async function verifyAnchorTxOnHorizon(txHash: string): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${config.stellar.horizonUrl}/transactions/${txHash}`,
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 const router = Router();
 
@@ -356,6 +368,15 @@ router.post(
         continue;
       }
 
+      const candidateAnchorTx = anchorTxHashes[i] || null;
+      if (candidateAnchorTx) {
+        const txExists = await verifyAnchorTxOnHorizon(candidateAnchorTx);
+        if (!txExists) {
+          fs.unlinkSync(file.path);
+          continue;
+        }
+      }
+
       const attachment = await prisma.attachment.create({
         data: {
           uploaderId: req.userId!,
@@ -366,7 +387,7 @@ router.post(
           size: file.size,
           url: `/api/uploads/${file.filename}`,
           sha256: computedSha256,
-          anchorTxHash: anchorTxHashes[i] || null,
+          anchorTxHash: candidateAnchorTx,
         },
       });
 

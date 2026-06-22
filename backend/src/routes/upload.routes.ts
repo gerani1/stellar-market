@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { validate } from "../middleware/validation";
+import { config } from "../config";
 import {
   upload,
   UPLOAD_DIR,
@@ -152,6 +153,27 @@ router.post(
           fs.unlinkSync(req.file.path);
           return res.status(403).json({
             error: "Only job participants can upload files",
+          });
+        }
+      }
+
+      if (anchorTxHash) {
+        try {
+          const horizonRes = await fetch(
+            `${config.stellar.horizonUrl}/transactions/${anchorTxHash}`,
+          );
+          if (!horizonRes.ok) {
+            fs.unlinkSync(req.file.path);
+            return res.status(422).json({
+              error:
+                "Anchor transaction not found on the Stellar network. Provide a valid transaction hash.",
+            });
+          }
+        } catch {
+          fs.unlinkSync(req.file.path);
+          return res.status(502).json({
+            error:
+              "Unable to verify anchor transaction on the Stellar network. Please try again.",
           });
         }
       }
